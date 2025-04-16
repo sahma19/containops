@@ -45,12 +45,6 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.setup.outputs.images ) }}
     steps:
-      - name: Login to GHCR
-        uses: docker/login-action@v3.3.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
       - name: Generate Trivy Report
         uses: aquasecurity/trivy-action@0.29.0
         with:
