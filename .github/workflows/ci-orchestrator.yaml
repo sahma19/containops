@@ -1,0 +1,86 @@
+name: continuous-patch
+on: workflow_dispatch
+# Cron Trigger 4:45 daily
+# on:
+#   schedule:
+#     - cron: "45 4 * * *"
+
+env:
+  REGISTRY: "ghcr.io/${{ github.actor }}"
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    outputs:
+      images: ${{ steps.copatag.outputs.images }}
+    steps:
+      - name: Checkout to repository
+        uses: actions/checkout@v4
+      - name: Login to GHCR
+        id: login
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      - name: copatag
+        id: copatag
+        uses: sahma19/copatag-action@main
+        with:
+          copatag_version: "0.1.2"
+          registry: ${{ env.REGISTRY }}
+      - name: Display images
+        id: display
+        run: echo ${{ steps.copatag.outputs.images }}
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+      contents: write
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.setup.outputs.images ) }}
+    steps:
+      - name: Generate Trivy Report
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: "image"
+          format: "json"
+          output: "report.json"
+          ignore-unfixed: true
+          vuln-type: "os"
+          image-ref: ${{ env.REGISTRY}}/${{ matrix.image_name }}
+
+      - name: Check vulnerability count
+        id: vuln_count
+        run: |
+          report_file="report.json"
+          vuln_count=$(jq 'if .Results then [.Results[] | select(.Class=="os-pkgs" and .Vulnerabilities!=null) | .Vulnerabilities[]] | length else 0 end' "$report_file")
+          echo "vuln_count=$vuln_count" >> $GITHUB_OUTPUT
+
+      - name: Run copa action
+        if: steps.vuln_count.outputs.vuln_count != '0'
+        id: copa
+        uses: project-copacetic/copa-action@v1.2.1
+        with:
+          image: ${{ env.REGISTRY}}/${{ matrix.image_name }}
+          image-report: "report.json"
+          patched-tag: ${{ matrix.next_patch_tag }}
+
+      - name: Login to GHCR
+        if: steps.copa.conclusion == 'success'
+        id: login
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Push patched image
+        if: steps.login.conclusion == 'success'
+        run: |
+          docker push ${{ steps.copa.outputs.patched-image }}
