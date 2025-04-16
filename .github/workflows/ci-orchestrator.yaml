@@ -29,7 +29,7 @@ jobs:
         id: copatag
         uses: sahma19/copatag-action@main
         with:
-          copatag_version: "v0.1.2"
+          copatag_version: "0.1.2"
           registry: ${{ env.REGISTRY }}
       - name: Display images
         id: display
